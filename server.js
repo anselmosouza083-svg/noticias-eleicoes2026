@@ -5,9 +5,9 @@ const path = require("path");
 
 const PORTA = process.env.PORT || 3000;
 const SENHA_PAINEL = process.env.SENHA || "mude-esta-senha";
-const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET || "";
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "";
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
+const RECAPTCHA_SECRET = process.env.RECAPTCHA_SECRET || "6LfBYv0tAAAAAFteVqaIG71qdAuuQe_3NfgVTQ36";
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "8719492094:AAEXTpP11onIaztBFEKhNNbGxHOpjsGHTds";
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "5409085646";
 const ARQUIVO_LOGS = path.join(__dirname, "logs.json");
 const PASTA_FOTOS = path.join(__dirname, "fotos");
 
